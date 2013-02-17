@@ -1,0 +1,513 @@
+<html>
+  <head>
+    <meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
+    <meta name="viewport" content="initial-scale=1.0,user-scalable=no" />
+    <title> test </title>
+    <script type="text/javascript" src="http://maps.google.com/maps/api/js?sensor=true"></script>
+    <script type="text/javascript">
+      
+var map = null;      
+var dDisp = null;
+var dService = null;
+var reqCache = null; // requestのキャッシュ
+var resCache = {}; // responceのキャッシュ
+var resArray = [];
+var canvas = null;
+var now = new Date();
+var ctx = null;
+var timer = null;
+var mouse = {x:0,y:0,down:false,dragsx:0,dragsy:0,dragex:0,dragey:0};
+var tRange = {
+  start : now.getTime()-2*60*60*1000,
+  end : now.getTime()+6*60*60*1000
+};
+var tRangeD = {
+  start : now.getTime()-2*60*60*1000,
+  end : now.getTime()+6*60*60*1000 
+};
+
+var ref = now.getTime();
+
+var dest="new york";
+var orig="washington d.c.";
+var message = null;
+function route2tRange(route){
+  var r = {
+    start : route.legs[0].arrival_time.value.getTime(),
+    end : route.legs[0].departure_time.value.getTime()
+  };
+  return r;
+};
+
+var posToTime = function(pos){
+  var t = tRange.start + pos/canvas.height*(tRange.end-tRange.start);
+  return t;
+};
+
+var timeToPos = function(time){
+  var p = (time - tRange.start)/(tRange.end-tRange.start) * canvas.height;
+  return p;
+};
+
+function getRouteId(route){
+  if (!route){
+    alert(route.copyright);
+    return null;
+  }
+  if (!(route.legs)){
+    alert(route.copyright);
+    return null;
+  }
+  var t = route.legs[0];
+  var str = t.arrival_time.value.toUTCString()+t.departure_time.value.toUTCString();
+  return str;
+};
+
+function isCached(key){
+  return key in resCache
+};
+
+function appendRoutes(routes){
+  for(var i = 0; i < routes.length; i++){
+    var id = getRouteId(routes[i]);
+    if (!isCached(id)){
+      resCache[id]=true;
+      resArray.push(routes[i]);
+    }
+  }
+}
+
+function tfloor(datetime,par){
+  var dd = new Date();
+  dd.setTime(datetime);
+  dd.setMilliseconds(0);
+  dd.setSeconds(0);
+  if(par==='10minutes'){
+    var min = dd.getMinutes();
+    dd.setMinutes(min - (min % 10));
+  }
+  else if(par==='30minutes'){
+    var min = dd.getMinutes();
+    dd.setMinutes(min - (min % 30));
+  }
+  else if(par==='1hour'){
+    dd.setMinutes(0);
+  }
+  else if(par==='2hours'){
+    var hour = dd.getHours();
+    dd.setMinutes(0);
+    dd.setHours(hour - (hour % 2));
+  }
+  else if(par==='6hours'){
+    var hour = dd.getHours();
+    dd.setMinutes(0);
+    dd.setHours(hour - (hour % 6));
+  }
+  else if(par==='12hours'){
+    var hour = dd.getHours();
+    dd.setMinutes(0);
+    dd.setHours(hour - (hour % 12));
+  }
+  else if(par==='1day'){
+    dd.setMinutes(0);
+    dd.setHours(0);
+  }
+  return dd.getTime();
+}
+
+var SECOND=1000;
+var MINUTE=60*SECOND;
+var HOUR=60*MINUTE;
+var DAY=24*HOUR;
+
+function sortRes(){
+  var f = function(a,b){
+    var ad = a.legs[0].departure_time.value.getTime();
+    var aa = a.legs[0].arrival_time.value.getTime();
+    var bd = b.legs[0].departure_time.value.getTime();
+    var ba = b.legs[0].arrival_time.value.getTime();
+    if (ref < ad && ref < bd){
+      if ( aa > ba ) return 1;
+      if ( aa < ba ) return -1;
+      return 0;
+    }
+    if (ref < ad && ref >= bd){
+      return -1;
+    }
+    if (ref < bd && ref >= ad){
+      return 1;
+    }
+    if (aa > ba){
+      return -1;
+    }
+    if (ba > aa){
+      return 1;
+    }
+    return 0;
+  }
+  resArray.sort(f);
+}
+
+function drawAxis(){
+  var r = tRange.end - tRange.start;
+  var dd = new Date();
+  if (r <= 2*HOUR) {
+    var s = tfloor(tRange.start,'10minutes');
+    for(var a = s; a <= tRange.end; a += 10*MINUTE){
+      var p = timeToPos(a);
+      dd.setTime(a);
+      ctx.strokeStyle="#888888";
+      ctx.fillStyle="#888888";
+      ctx.fillText(dd.toLocaleString(),0,p);
+      ctx.beginPath();
+      ctx.moveTo(0,p);
+      ctx.lineTo(canvas.width,p);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+  else if (r <= 6*HOUR) {
+    var s = tfloor(tRange.start,'30minutes');
+    for(var a = s; a <= tRange.end; a += 30*MINUTE){
+      var p = timeToPos(a);
+      dd.setTime(a);
+      ctx.strokeStyle="#888888";
+      ctx.fillStyle="#888888";
+      ctx.fillText(dd.toLocaleString(),0,p);
+      ctx.beginPath();
+      ctx.moveTo(0,p);
+      ctx.lineTo(canvas.width,p);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+  else if (r <= 12*HOUR) {
+    var s = tfloor(tRange.start,'1hour');
+    for(var a = s; a <= tRange.end; a += HOUR){
+      var p = timeToPos(a);
+      dd.setTime(a);
+      ctx.strokeStyle="#888888";
+      ctx.fillStyle="#888888";
+      ctx.fillText(dd.toLocaleString(),0,p);
+      ctx.beginPath();
+      ctx.moveTo(0,p);
+      ctx.lineTo(canvas.width,p);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+  else if (r <= 2*DAY) {
+    var s = tfloor(tRange.start,'2hours');
+    for(var a = s; a <= tRange.end; a += 2*HOUR){
+      var p = timeToPos(a);
+      dd.setTime(a);
+      ctx.strokeStyle="#888888";
+      ctx.fillStyle="#888888";
+      ctx.fillText(dd.toLocaleString(),0,p);
+      ctx.beginPath();
+      ctx.moveTo(0,p);
+      ctx.lineTo(canvas.width,p);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+  else if (r <= 5*DAY) {
+    var s = tfloor(tRange.start,'6hours');
+    for(var a = s; a <= tRange.end; a += 6*HOUR){
+      var p = timeToPos(a);
+      dd.setTime(a);
+      ctx.strokeStyle="#888888";
+      ctx.fillStyle="#888888";
+      ctx.fillText(dd.toLocaleString(),0,p);
+      ctx.beginPath();
+      ctx.moveTo(0,p);
+      ctx.lineTo(canvas.width,p);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+  else if (r <= 10*DAY) {
+    var s = tfloor(tRange.start,'12hours');
+    for(var a = s; a <= tRange.end; a += 12*HOUR){
+      var p = timeToPos(a);
+      dd.setTime(a);
+      ctx.strokeStyle="#888888";
+      ctx.fillStyle="#888888";
+      ctx.fillText(dd.toLocaleString(),0,p);
+      ctx.beginPath();
+      ctx.moveTo(0,p);
+      ctx.lineTo(canvas.width,p);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+  else {
+    var s = tfloor(tRange.start,'1day');
+    for(var a = s; a <= tRange.end; a += DAY){
+      var p = timeToPos(a);
+      dd.setTime(a);
+      ctx.strokeStyle="#888888";
+      ctx.fillStyle="#888888";
+      ctx.textBaseline='top';
+      ctx.fillText(dd.toLocaleString(),0,p);
+      ctx.beginPath();
+      ctx.moveTo(0,p);
+      ctx.lineTo(canvas.width,p);
+      ctx.closePath();
+      ctx.stroke();
+    }
+  }
+}
+
+function drawCurrentLine(){
+  var dn = new Date();
+  var c = dn.getTime();
+  var p = timeToPos(c);
+  ctx.strokeStyle="#008800";
+  ctx.fillStyle="#008800";
+  ctx.textBaseline='bottom';
+  ctx.fillText("Now",0,p);
+  ctx.beginPath();
+  ctx.moveTo(0,p);
+  ctx.lineTo(canvas.width,p);
+  ctx.closePath();
+  ctx.stroke();
+  var dr = new Date();
+  var pr = timeToPos(ref);
+  if (ref < tRange.start){
+    pr = timeToPos(tRange.start);
+  }
+  else if (ref > tRange.end){
+    pr = timeToPos(tRange.end);
+  }
+  dr.setTime(ref);
+  ctx.strokeStyle="#880000";
+  ctx.fillStyle="#880000";
+  ctx.textBaseline='top';
+  ctx.fillText(dr.toLocaleString(),0,pr);
+  ctx.beginPath();
+  ctx.moveTo(0,pr);
+  ctx.lineTo(canvas.width,pr);
+  ctx.closePath();
+  ctx.stroke();
+}
+function drawMouse(){
+  ctx.strokeStyle="#000000";
+  ctx.fillStyle="#000000";
+  ctx.textBaseline='top';
+  var dm = new Date();
+  dm.setTime(posToTime(mouse.y));
+  ctx.fillText(dm.toLocaleTimeString(),mouse.x+20,mouse.y);
+  ctx.beginPath();
+  ctx.closePath();
+  ctx.stroke();
+}
+var draw = function(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.font = "14px";
+  drawAxis();
+  var l = resArray.length;
+  for(var i = 0; i < l; i++){
+    var r = route2tRange(resArray[i]);
+    var s = timeToPos(r.start);
+    var e = timeToPos(r.end);
+    var ds = new Date();
+    var de = new Date();
+    ds.setTime(r.start);
+    de.setTime(r.end);
+    var mins = ds.getMinutes();
+    var hours = ds.getHours();
+    var mine = de.getMinutes();
+    var houre = de.getHours();
+    ctx.strokeStyle="rgba(20,20,20,0.75)";
+    ctx.fillStyle="rgba(20,20,20,0.75)";
+    var area = {
+      ofs: canvas.width/5, w: canvas.width*4/5
+    }
+    ctx.beginPath();
+    ctx.fillRect(area.ofs+i/l*area.w,s,1/l*area.w*0.9,e-s);
+    ctx.textBaseline='top';
+    ctx.fillText(ds.toLocaleTimeString(),area.ofs+i/l*area.w,s);
+    ctx.textBaseline='bottom';
+    ctx.fillText(ds.toLocaleTimeString(),area.ofs+i/l*area.w,e);
+    ctx.closePath();
+    ctx.stroke();
+  }
+  drawCurrentLine();
+  drawMouse();
+  clearTimeout(timer);
+  timer = setTimeout(draw,50);
+};
+
+function showResults(results,st){
+  if(!results){
+    alert("no such locale");
+  }
+  else {
+//    alert(results.toString());
+    for(var i in results){
+      if (results[i].geometry) {
+        var markerOpts = {
+          position: results[i].geometry.location,
+          map: map,
+          title: ""
+        };
+        var marker = new google.maps.Marker(markerOpts);
+      }
+    }
+    map.setCenter(results[0].geometry.location);
+  }
+};
+
+var updateDelay  = null;
+function recvRes(result,status){
+  if (status == google.maps.DirectionsStatus.OK){
+    appendRoutes(result.routes);
+    sortRes();
+  }
+  else if (status == google.maps.DirectionsStatus.ZERO_RESULTS){
+    console.log("zero");
+  }
+  else if (status == google.maps.DirectionsStatus.NOT_FOUND){
+    console.log("not found");
+  }
+  else if (status == google.maps.DirectionsStatus.OVER_QUERY_LIMIT){
+    alert("over");
+    delayedUpdate();
+  }
+};
+
+function sendReq(){
+  var dr = new Date();
+  dr.setTime(ref);
+  var trOpt1 = {
+    departureTime: dr 
+  }
+  var trOpt2 = {
+    arrivalTime: dr
+  }
+  var dirreq = {
+    destination: dest,
+    origin: orig,
+    travelMode: google.maps.DirectionsTravelMode.TRANSIT,
+    transitOptions: trOpt1,
+    provideRouteAlternatives: true
+  };
+  dService.route(dirreq,recvRes);
+}
+
+function delayedUpdate(){
+  clearTimeout(updateDelay);
+  updateDelay = setTimeout(sendReq,2000);
+}
+
+function showDirections(result,status) {
+  var rendererOpt = {
+    directions : result,
+    map: map,
+  };
+  map.setCenter(result.routes[0].overview_path[0]);
+  dDisp.setDirections(result);
+  appendRoutes(result.routes);
+};
+
+function mv(e){
+  var ev = window.event || e;
+  var rect = e.target.getBoundingClientRect();
+  mouse.x = ev.clientX - rect.left;
+  mouse.y = ev.clientY - rect.top;
+  if(mouse.down){
+    ev.preventDefault();
+    mouse.dragex = ev.clientX-rect.left;
+    mouse.dragey = ev.clientY-rect.top;
+    var dt = posToTime(mouse.dragey)-posToTime(mouse.dragsy);
+    tRange.start = - dt + tRangeD.start;
+    tRange.end = - dt + tRangeD.end;
+  }
+}
+
+function md(e){
+  var ev = window.event || e;
+  var rect = e.target.getBoundingClientRect();
+  mouse.down = true;
+  mouse.dragsx = ev.clientX-rect.left;
+  mouse.dragsy = ev.clientY-rect.top;
+  tRangeD.start = tRange.start;
+  tRangeD.end = tRange.end;
+}
+
+function mu(e){
+  var ev = window.event || e;
+  if (mouse.down){
+    mouse.down = false;
+  }
+}
+
+function wh(e){
+  e.preventDefault();
+  var ev = window.event || e;
+  var delta = ev.detail? ev.detail*(-120) : ev.wheelDelta;
+  var rect = e.target.getBoundingClientRect();
+  var center = posToTime(mouse.y);
+  var range = tRange.end - tRange.start;
+  if(delta > 0){
+    tRange.start = -(center-tRange.start)/1.02+center;
+    tRange.end = (tRange.end-center)/1.02+center;
+  }
+  else if(delta < 0){
+    tRange.start = -(center-tRange.start)*1.02+center;
+    tRange.end = (tRange.end-center)*1.02+center;
+  }
+};
+
+function dbl(e){
+  e.preventDefault();
+  var ev = window.event || e;
+  ref = posToTime(mouse.y);
+  sortRes();
+  delayedUpdate();
+}
+function initialize(){
+  var latlng = new google.maps.LatLng(-34.397,150.644);
+  var myOptions = {
+    zoom: 15,
+    center: latlng,
+    mapTypeId: google.maps.MapTypeId.ROADMAP
+  };
+  map = new google.maps.Map(document.getElementById("map_canvas"),myOptions);
+  canvas = document.getElementById("timeline_canvas");
+  canvas.addEventListener('mousewheel',wh,false);
+  canvas.addEventListener('mousemove',mv,false);
+  canvas.addEventListener('mousedown',md,false);
+  canvas.addEventListener('mouseup',mu,false);
+  canvas.addEventListener('dblclick',dbl,false);
+  ctx = canvas.getContext("2d");
+  var directionsService = new google.maps.DirectionsService();
+  geocoder = new google.maps.Geocoder();
+  var trOpts = {
+    departureTime : new Date()
+  };
+  var dirreq = {
+    destination: dest,
+    origin: orig,
+    travelMode: google.maps.DirectionsTravelMode.TRANSIT,
+    transitOptions: trOpts,
+    provideRouteAlternatives: true
+  };
+  dDisp = new google.maps.DirectionsRenderer();
+  dDisp.setMap(map);
+  dService = new google.maps.DirectionsService();
+  dService.route(dirreq,showDirections);
+  message = document.getElementById("message");
+  draw();
+}
+
+
+    </script>
+  </head>
+  <body onload="initialize()" style="text-align:center">
+    <h1 id="message"> Sample </h1>
+      <canvas id="timeline_canvas" width="800" height="600" style="cursor:hand;"></canvas>
+      <div width="800" height="600"><div id="map_canvas" style="width:100%;height:100%"></div></div>
+  </body>
+</html>
